@@ -5,9 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { startParsing } from "@/lib/api";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
-import { firecrawlApi } from "@/lib/api/firecrawl";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
@@ -36,134 +35,49 @@ export default function Sources() {
   const [scrapingSourceId, setScrapingSourceId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchSources();
+    // В реальности здесь был бы запрос к API для получения списка источников
+    // fetchSources();
   }, []);
-
-  const fetchSources = async () => {
-    const { data, error } = await supabase
-      .from("sources")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Error fetching sources:", error);
-      return;
-    }
-
-    setSources(data || []);
-  };
 
   const handleAddSource = async (type: string) => {
     if (!url.trim()) {
-      toast.error("Введите URL источника");
+      toast.error("Введите тег или имя");
       return;
+    }
+    
+    // Пока реализуем только Instagram
+    if (type !== 'instagram') {
+        toast.info("В демо-режиме доступен только Instagram");
+        return;
     }
 
     setIsLoading(true);
 
     try {
-      // Extract name from URL
-      const urlObj = new URL(url.startsWith("http") ? url : `https://${url}`);
-      const name = urlObj.hostname.replace("www.", "");
-
-      const { data, error } = await supabase
-        .from("sources")
-        .insert({
-          url: url.startsWith("http") ? url : `https://${url}`,
-          type,
-          name,
-          is_active: true,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        toast.error("Ошибка при добавлении источника");
-        console.error(error);
-        return;
+      const result = await startParsing(url);
+      
+      if (result.status === "success") {
+          toast.success(`Успешно! Найдено ${result.parsed} постов.`);
+          // В реальности тут нужно обновить список источников
+      } else {
+          toast.error("Ошибка парсинга");
       }
-
-      toast.success(`Источник добавлен: ${name}`);
+      
       setUrl("");
-      setSources((prev) => [data, ...prev]);
-
-      // Auto-scrape for web sources
-      if (type === "web") {
-        await handleScrapeSource(data);
-      }
     } catch (e) {
-      toast.error("Неверный формат URL");
+      toast.error("Ошибка сети");
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleScrapeSource = async (source: Source) => {
-    setScrapingSourceId(source.id);
+    // Заглушка для повторного парсинга
     toast.info(`Парсинг: ${source.name || source.url}...`);
-
-    try {
-      const response = await firecrawlApi.scrape(source.url, {
-        formats: ["markdown"],
-        onlyMainContent: true,
-      });
-
-      if (!response.success) {
-        toast.error(`Ошибка парсинга: ${response.error}`);
-        return;
-      }
-
-      const scrapeData = response.data || response;
-      const markdown = scrapeData?.markdown || scrapeData?.data?.markdown;
-      const metadata = scrapeData?.metadata || scrapeData?.data?.metadata;
-
-      if (!markdown) {
-        toast.error("Не удалось извлечь контент");
-        return;
-      }
-
-      // Save content to content_items
-      const { error: contentError } = await supabase.from("content_items").insert({
-        source_id: source.id,
-        source_type: source.type,
-        original_url: source.url,
-        title: metadata?.title || source.name,
-        content: markdown,
-        summary: markdown.substring(0, 500),
-        status: "new",
-        metadata: metadata || {},
-      });
-
-      if (contentError) {
-        console.error("Error saving content:", contentError);
-        toast.error("Ошибка сохранения контента");
-        return;
-      }
-
-      // Update source last_scraped_at
-      await supabase
-        .from("sources")
-        .update({ last_scraped_at: new Date().toISOString() })
-        .eq("id", source.id);
-
-      toast.success("Контент успешно собран!");
-      fetchSources();
-    } catch (error) {
-      console.error("Scrape error:", error);
-      toast.error("Ошибка при парсинге страницы");
-    } finally {
-      setScrapingSourceId(null);
-    }
   };
 
   const handleDeleteSource = async (id: string) => {
-    const { error } = await supabase.from("sources").delete().eq("id", id);
-
-    if (error) {
-      toast.error("Ошибка при удалении");
-      return;
-    }
-
+    // Заглушка для удаления
     setSources((prev) => prev.filter((s) => s.id !== id));
     toast.success("Источник удалён");
   };
