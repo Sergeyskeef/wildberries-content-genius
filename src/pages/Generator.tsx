@@ -1,176 +1,120 @@
-import { useState } from "react";
-import { Sparkles, Wand2, Image, FileText, RefreshCw, Download } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Sparkles, Wand2, RefreshCw, Download, Loader2, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { fetchCarousels, getCarouselDownloadUrl } from "@/lib/api";
+import { toast } from "sonner";
+import { format } from "date-fns";
+import { ru } from "date-fns/locale";
+
+type Carousel = {
+  id: number;
+  plan_id: number;
+  status: string;
+  created_at: string;
+  plan?: {
+    title: string;
+  };
+};
 
 export default function Generator() {
-  const [topic, setTopic] = useState("");
-  const [contentType, setContentType] = useState("advice");
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [carousels, setCarousels] = useState<Carousel[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const handleGenerate = async () => {
-    if (!topic.trim()) return;
-    
-    setIsGenerating(true);
-    // Placeholder for actual implementation
-    setTimeout(() => {
-      setIsGenerating(false);
-    }, 2000);
+  useEffect(() => {
+    loadCarousels();
+  }, []);
+
+  const loadCarousels = async () => {
+    setIsLoading(true);
+    try {
+      const data = await fetchCarousels();
+      setCarousels(data);
+    } catch (e) {
+      console.error("Failed to load carousels", e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDownload = async (id: number) => {
+    try {
+      const res = await getCarouselDownloadUrl(id);
+      if (res.download_url) {
+        window.open(res.download_url, "_blank");
+      } else {
+        toast.error("Ошибка получения ссылки");
+      }
+    } catch (e) {
+      toast.error("Ошибка сети");
+    }
   };
 
   return (
     <div className="p-8 space-y-8 animate-fade-in">
-      {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-foreground">AI-генератор постов</h1>
+        <h1 className="text-3xl font-bold text-foreground">Завод Готового Контента</h1>
         <p className="text-muted-foreground mt-1">
-          Создавайте Instagram-карусели с помощью искусственного интеллекта
+          Здесь появляются результаты работы вашего контент-завода
         </p>
       </div>
 
       <div className="grid gap-8 lg:grid-cols-2">
-        {/* Input Section */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
+        <Card className="lg:col-span-2">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
               <CardTitle className="flex items-center gap-2">
-                <Wand2 className="h-5 w-5 text-primary" />
-                Настройки генерации
+                <ImageIcon className="h-5 w-5 text-primary" />
+                Готовые карусели
               </CardTitle>
               <CardDescription>
-                Опишите тему или выберите контент из базы
+                ZIP-архивы со слайдами и метаданными, готовые к публикации
               </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Тип контента</Label>
-                <Select value={contentType} onValueChange={setContentType}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="advice">Совет для селлеров</SelectItem>
-                    <SelectItem value="case">Кейс / История успеха</SelectItem>
-                    <SelectItem value="trend">Тренд / Новость</SelectItem>
-                    <SelectItem value="motivation">Мотивация</SelectItem>
-                    <SelectItem value="education">Обучающий контент</SelectItem>
-                  </SelectContent>
-                </Select>
+            </div>
+            <Button variant="outline" size="sm" onClick={loadCarousels}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+              Обновить
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="topic">Тема или идея поста</Label>
-                <Textarea
-                  id="topic"
-                  placeholder="Например: Как выбрать нишу для начала работы на Wildberries в 2024 году"
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  rows={4}
-                />
-              </div>
-
-              <Button 
-                onClick={handleGenerate}
-                disabled={isGenerating || !topic.trim()}
-                className="w-full gradient-primary text-primary-foreground"
-              >
-                {isGenerating ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Генерация...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Сгенерировать пост
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Или выберите из базы</CardTitle>
-              <CardDescription>
-                Используйте собранный вирусный контент
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <p className="text-sm text-muted-foreground">
-                  База контента пуста
+            ) : carousels.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center mb-6">
+                  <Sparkles className="h-10 w-10 text-muted-foreground" />
+                </div>
+                <h3 className="text-lg font-semibold">Пока ничего не готово</h3>
+                <p className="text-muted-foreground max-w-sm">
+                  Одобрите идею в разделе "База контента", и она появится здесь через пару минут.
                 </p>
-                <Button variant="link" className="mt-2" asChild>
-                  <a href="/sources">Добавить источники</a>
+                <Button variant="outline" className="mt-6" asChild>
+                  <a href="/content">Перейти к базе</a>
                 </Button>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Output Section */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Результат генерации</CardTitle>
-              <CardDescription>
-                Готовый пост для Instagram
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Tabs defaultValue="text" className="space-y-4">
-                <TabsList className="grid grid-cols-2">
-                  <TabsTrigger value="text" className="gap-2">
-                    <FileText className="h-4 w-4" />
-                    Текст
-                  </TabsTrigger>
-                  <TabsTrigger value="visuals" className="gap-2">
-                    <Image className="h-4 w-4" />
-                    Визуалы
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="text">
-                  <div className="min-h-[300px] rounded-lg border border-dashed border-border flex items-center justify-center">
-                    <div className="text-center p-6">
-                      <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                      <p className="text-muted-foreground">
-                        Здесь появится сгенерированный текст поста
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {carousels.map((c) => (
+                  <div key={c.id} className="p-4 rounded-lg border bg-card flex flex-col justify-between gap-4">
+                    <div>
+                      <h4 className="font-bold text-lg line-clamp-1">{c.plan?.title || "Без названия"}</h4>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Создано: {format(new Date(c.created_at), "d MMMM, HH:mm", { locale: ru })}
                       </p>
                     </div>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="visuals">
-                  <div className="min-h-[300px] rounded-lg border border-dashed border-border flex items-center justify-center">
-                    <div className="text-center p-6">
-                      <Image className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                      <p className="text-muted-foreground">
-                        Здесь появятся сгенерированные слайды карусели
-                      </p>
+                    <div className="flex gap-2">
+                      <Button className="flex-1 gradient-primary" onClick={() => handleDownload(c.id)}>
+                        <Download className="h-4 w-4 mr-2" /> Скачать ZIP
+                      </Button>
                     </div>
                   </div>
-                </TabsContent>
-              </Tabs>
-
-              <div className="flex gap-2 mt-4">
-                <Button variant="outline" className="flex-1" disabled>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Перегенерировать
-                </Button>
-                <Button variant="outline" className="flex-1" disabled>
-                  <Download className="mr-2 h-4 w-4" />
-                  Скачать
-                </Button>
+                ))}
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

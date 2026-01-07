@@ -1,69 +1,36 @@
 import { useState, useEffect } from "react";
-import { Globe, Youtube, Send, Instagram, Plus, Search, Trash2, ExternalLink, RefreshCw } from "lucide-react";
+import { Globe, Youtube, Send, Instagram, Plus, Search, Play, RefreshCw, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { startParsing } from "@/lib/api";
+import { startRun } from "@/lib/api";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
-import { format } from "date-fns";
-import { ru } from "date-fns/locale";
-
-const sourceTypes = [
-  { id: "web", label: "Веб-сайты", icon: Globe, description: "Блоги и статьи" },
-  { id: "youtube", label: "YouTube", icon: Youtube, description: "Видео и каналы" },
-  { id: "telegram", label: "Telegram", icon: Send, description: "Каналы" },
-  { id: "instagram", label: "Instagram", icon: Instagram, description: "Аккаунты" },
-];
-
-type Source = {
-  id: string;
-  url: string;
-  type: string;
-  name: string | null;
-  is_active: boolean;
-  last_scraped_at: string | null;
-  created_at: string;
-};
 
 export default function Sources() {
-  const [url, setUrl] = useState("");
+  const [query, setQuery] = useState("wildberries");
   const [isLoading, setIsLoading] = useState(false);
-  const [sources, setSources] = useState<Source[]>([]);
-  const [scrapingSourceId, setScrapingSourceId] = useState<string | null>(null);
 
-  useEffect(() => {
-    // В реальности здесь был бы запрос к API для получения списка источников
-    // fetchSources();
-  }, []);
-
-  const handleAddSource = async (type: string) => {
-    if (!url.trim()) {
-      toast.error("Введите тег или имя");
+  const handleStartDiscovery = async () => {
+    if (!query.trim()) {
+      toast.error("Введите тему для поиска");
       return;
     }
     
-    // Пока реализуем только Instagram
-    if (type !== 'instagram') {
-        toast.info("В демо-режиме доступен только Instagram");
-        return;
-    }
-
     setIsLoading(true);
-
     try {
-      const result = await startParsing(url);
+      const result = await startRun("discovery", { 
+        queries: [query],
+        limit_per_query: 5
+      });
       
       if (result.status === "success") {
-          toast.success(`Успешно! Найдено ${result.parsed} постов.`);
-          // В реальности тут нужно обновить список источников
+          toast.success(`Запущен процесс поиска аккаунтов по теме "${query}"`);
       } else {
-          toast.error("Ошибка парсинга");
+          toast.error("Ошибка запуска");
       }
-      
-      setUrl("");
     } catch (e) {
       toast.error("Ошибка сети");
     } finally {
@@ -71,203 +38,163 @@ export default function Sources() {
     }
   };
 
-  const handleScrapeSource = async (source: Source) => {
-    // Заглушка для повторного парсинга
-    toast.info(`Парсинг: ${source.name || source.url}...`);
+  const handleStartHarvest = async () => {
+    setIsLoading(true);
+    try {
+      const result = await startRun("harvest", { 
+        accounts_limit: 5,
+        posts_per_profile: 10
+      });
+      
+      if (result.status === "success") {
+          toast.success(`Запущен процесс сбора контента из активных источников`);
+      } else {
+          toast.error("Ошибка запуска");
+      }
+    } catch (e) {
+      toast.error("Ошибка сети");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleDeleteSource = async (id: string) => {
-    // Заглушка для удаления
-    setSources((prev) => prev.filter((s) => s.id !== id));
-    toast.success("Источник удалён");
-  };
-
-  const getSourceIcon = (type: string) => {
-    const sourceType = sourceTypes.find((s) => s.id === type);
-    return sourceType?.icon || Globe;
+  const handleStartScoring = async () => {
+    setIsLoading(true);
+    try {
+      const result = await startRun("scoring");
+      
+      if (result.status === "success") {
+          toast.success(`Запущен процесс оценки контента через AI`);
+      } else {
+          toast.error("Ошибка запуска");
+      }
+    } catch (e) {
+      toast.error("Ошибка сети");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className="p-8 space-y-8 animate-fade-in">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-foreground">Источники контента</h1>
+        <h1 className="text-3xl font-bold text-foreground">Завод Контента</h1>
         <p className="text-muted-foreground mt-1">
-          Добавляйте источники для автоматического сбора вирусного контента
+          Управление автоматизированными пайплайнами сбора и анализа
         </p>
       </div>
 
-      {/* Source Types */}
-      <Tabs defaultValue="web" className="space-y-6">
-        <TabsList className="grid grid-cols-4 w-full max-w-2xl">
-          {sourceTypes.map((type) => (
-            <TabsTrigger key={type.id} value={type.id} className="gap-2">
-              <type.icon className="h-4 w-4" />
-              <span className="hidden sm:inline">{type.label}</span>
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        {sourceTypes.map((type) => (
-          <TabsContent key={type.id} value={type.id}>
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <type.icon className="h-5 w-5 text-primary" />
-                  {type.label}
-                </CardTitle>
-                <CardDescription>{type.description}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card className="relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Search className="h-16 w-16" />
+            </div>
+            <CardHeader>
+                <CardTitle className="text-lg">1. Discovery</CardTitle>
+                <CardDescription>Поиск новых аккаунтов-доноров</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor={`url-${type.id}`}>URL источника</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id={`url-${type.id}`}
-                      placeholder={
-                        type.id === "web"
-                          ? "https://example.com/blog"
-                          : type.id === "youtube"
-                          ? "https://youtube.com/@channel"
-                          : type.id === "telegram"
-                          ? "https://t.me/channel"
-                          : "https://instagram.com/account"
-                      }
-                      value={url}
-                      onChange={(e) => setUrl(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleAddSource(type.id)}
+                    <Label>Тема поиска</Label>
+                    <Input 
+                        placeholder="Например: wildberries" 
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
                     />
-                    <Button
-                      onClick={() => handleAddSource(type.id)}
-                      disabled={isLoading}
-                      className="gradient-primary text-primary-foreground"
-                    >
-                      {isLoading ? (
-                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                      ) : (
-                        <Plus className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
                 </div>
+                <Button 
+                    className="w-full gradient-primary" 
+                    onClick={handleStartDiscovery}
+                    disabled={isLoading}
+                >
+                    <Search className="h-4 w-4 mr-2" /> Найти аккаунты
+                </Button>
+            </CardContent>
+        </Card>
 
-                {type.id === "web" && (
-                  <div className="rounded-lg bg-muted/50 p-4">
-                    <p className="text-sm text-muted-foreground">
-                      💡 <strong>Совет:</strong> Добавляйте страницы с полезными статьями о Wildberries.
-                      Система автоматически извлечёт контент и оценит его вирусность.
-                    </p>
-                  </div>
-                )}
+        <Card className="relative overflow-hidden group border-primary/20 bg-primary/5">
+            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                <RefreshCw className="h-16 w-16" />
+            </div>
+            <CardHeader>
+                <CardTitle className="text-lg">2. Harvest</CardTitle>
+                <CardDescription>Сбор постов из источников</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                    Запускает Apify Scraper для всех активных аккаунтов в базе.
+                </p>
+                <Button 
+                    variant="outline"
+                    className="w-full border-primary/50 text-primary hover:bg-primary/10" 
+                    onClick={handleStartHarvest}
+                    disabled={isLoading}
+                >
+                    <Play className="h-4 w-4 mr-2" /> Собрать посты
+                </Button>
+            </CardContent>
+        </Card>
 
-                {type.id === "youtube" && (
-                  <div className="rounded-lg bg-muted/50 p-4">
-                    <p className="text-sm text-muted-foreground">
-                      💡 <strong>Совет:</strong> Добавляйте каналы популярных экспертов по маркетплейсам.
-                      Будут анализироваться просмотры и вовлечённость.
-                    </p>
-                  </div>
-                )}
+        <Card className="relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Zap className="h-16 w-16" />
+            </div>
+            <CardHeader>
+                <CardTitle className="text-lg">3. Scoring</CardTitle>
+                <CardDescription>AI Оценка и фильтрация</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                    Оценка всех новых постов через OpenAI GPT-4.
+                </p>
+                <Button 
+                    variant="secondary" 
+                    className="w-full" 
+                    onClick={handleStartScoring}
+                    disabled={isLoading}
+                >
+                    <Zap className="h-4 w-4 mr-2" /> Оценить контент
+                </Button>
+            </CardContent>
+        </Card>
+      </div>
 
-                {type.id === "telegram" && (
-                  <div className="rounded-lg bg-muted/50 p-4">
-                    <p className="text-sm text-muted-foreground">
-                      💡 <strong>Совет:</strong> Добавляйте публичные каналы о WB, селлерах, инвестициях.
-                    </p>
-                  </div>
-                )}
-
-                {type.id === "instagram" && (
-                  <div className="rounded-lg bg-muted/50 p-4">
-                    <p className="text-sm text-muted-foreground">
-                      💡 <strong>Совет:</strong> Добавляйте аккаунты конкурентов для анализа их контента.
-                    </p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        ))}
-      </Tabs>
-
-      {/* Active Sources */}
       <Card>
         <CardHeader>
-          <CardTitle>Активные источники</CardTitle>
-          <CardDescription>Список подключённых источников контента</CardDescription>
+          <CardTitle>Статус интеграций</CardTitle>
         </CardHeader>
         <CardContent>
-          {sources.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
-                <Search className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <p className="text-muted-foreground">Источники не добавлены</p>
-              <p className="text-sm text-muted-foreground mt-1">Добавьте первый источник выше</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="p-4 rounded-lg border bg-card flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground uppercase">Apify</span>
+                <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-green-500" />
+                    <span className="font-medium">Connected</span>
+                </div>
             </div>
-          ) : (
-            <div className="space-y-3">
-              {sources.map((source) => {
-                const Icon = getSourceIcon(source.type);
-                return (
-                  <div
-                    key={source.id}
-                    className="flex items-center justify-between p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <Icon className="h-5 w-5 text-primary" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{source.name || source.url}</span>
-                          <Badge variant="secondary" className="text-xs">
-                            {sourceTypes.find((t) => t.id === source.type)?.label}
-                          </Badge>
-                        </div>
-                        <div className="text-sm text-muted-foreground flex items-center gap-2">
-                          <span className="truncate max-w-[300px]">{source.url}</span>
-                          {source.last_scraped_at && (
-                            <span>
-                              • Парсинг:{" "}
-                              {format(new Date(source.last_scraped_at), "d MMM, HH:mm", { locale: ru })}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {source.type === "web" && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleScrapeSource(source)}
-                          disabled={scrapingSourceId === source.id}
-                        >
-                          <RefreshCw
-                            className={`h-4 w-4 ${scrapingSourceId === source.id ? "animate-spin" : ""}`}
-                          />
-                        </Button>
-                      )}
-                      <Button variant="ghost" size="icon" asChild>
-                        <a href={source.url} target="_blank" rel="noopener noreferrer">
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDeleteSource(source.id)}
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="p-4 rounded-lg border bg-card flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground uppercase">OpenAI</span>
+                <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-green-500" />
+                    <span className="font-medium">GPT-4 Ready</span>
+                </div>
             </div>
-          )}
+            <div className="p-4 rounded-lg border bg-card flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground uppercase">Celery</span>
+                <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-green-500" />
+                    <span className="font-medium">Worker Active</span>
+                </div>
+            </div>
+            <div className="p-4 rounded-lg border bg-card flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground uppercase">MinIO</span>
+                <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-green-500" />
+                    <span className="font-medium">S3 Online</span>
+                </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

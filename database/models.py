@@ -61,19 +61,35 @@ class CarouselPlan(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class Carousel(Base):
-    """Готовая карусель (ZIP файл)"""
+    """Готовая карусель (ZIP файл в S3)"""
     __tablename__ = "carousels"
     
     id = Column(Integer, primary_key=True, index=True)
     plan_id = Column(Integer, ForeignKey("carousel_plans.id"), nullable=False)
-    zip_path = Column(String(500), nullable=False)
-    thumbnail_path = Column(String(500), nullable=True)
+    zip_object_key = Column(String(500), nullable=False)
+    thumbnail_object_key = Column(String(500), nullable=True)
     status = Column(String(50), default="ready", index=True)  # ready, published
     published_at = Column(DateTime, nullable=True)
     
     # Relations
     plan = relationship("CarouselPlan", back_populates="carousel")
     
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class PipelineRun(Base):
+    """Журнал запусков пайплайнов (Discovery, Harvest, Scoring)"""
+    __tablename__ = "pipeline_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    type = Column(String(50), nullable=False, index=True)  # discovery, harvest, scoring, complete
+    status = Column(String(50), default="pending", index=True)  # pending, running, completed, failed
+    config_snapshot = Column(JSON, nullable=True)  # {strategy, limit, tags, ...}
+    stats = Column(JSON, nullable=True)  # {found, saved, errors, ...}
+    error_log = Column(Text, nullable=True)
+    
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

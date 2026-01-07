@@ -1,7 +1,12 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from database.init_db import engine, Base
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
+from database.init_db import engine, Base, SessionLocal
+from database.models import PipelineRun
 import logging
+import os
+from datetime import datetime
 
 # Инициализация логирования
 logging.basicConfig(level=logging.INFO)
@@ -9,6 +14,10 @@ logger = logging.getLogger(__name__)
 
 # Инициализация FastAPI
 app = FastAPI(title="Content Factory API", version="1.0.0")
+
+class RunCreate(BaseModel):
+    type: str  # discovery, harvest, scoring
+    config: Optional[Dict[str, Any]] = None
 
 # Настройка CORS
 origins = [
@@ -30,114 +39,125 @@ async def health_check():
     """Проверка работоспособности сервиса"""
     return {"status": "ok", "service": "Content Factory API"}
 
-@app.post("/api/parse/instagram")
-async def parse_instagram(hashtag: str = "wildberries"):
-    """Запустить парсинг Instagram по хэштегу"""
-    from parser.instagram_parser import InstagramParser
-    from database.init_db import SessionLocal
-    
-    parser = InstagramParser()
-    results = parser.parse_hashtag(hashtag, amount=10)
-    
-    db = SessionLocal()
-    try:
-        saved_count = parser.save_to_db(db, results)
-        return {
-            "status": "success", 
-            "parsed": len(results), 
-            "saved": saved_count,
-            "hashtag": hashtag
-        }
-    finally:
-        db.close()
-
-
-@app.post("/api/analyze")
-async def analyze_pending():
-    """Проанализировать контент со статусом pending с помощью OpenAI"""
-    from database.init_db import SessionLocal
-    from database.models import ContentSource
-    from analyzer.analyzer import ContentAnalyzer
-    
-    db = SessionLocal()
-    try:
-        pending_items = db.query(ContentSource).filter_by(status="pending").limit(5).all()
-        if not pending_items:
-            return {"status": "ok", "message": "No pending items to analyze"}
-            
-        analyzer = ContentAnalyzer() # API key from env
-        
-        analyzed_count = 0
-        for item in pending_items:
-            score = analyzer.score_content(item)
-            item.score = score
-            item.status = "scored"
-            analyzed_count += 1
-            
-        db.commit()
-        return {"status": "success", "analyzed": analyzed_count}
-    except Exception as e:
-        logger.error(f"Analysis error: {e}")
-        return {"status": "error", "detail": str(e)}
-    finally:
-        db.close()
-
-
 @app.post("/api/ideas/{id}/approve")
 async def approve_idea(id: int):
-    """Одобрить идею и запустить генерацию карусели"""
-    from database.init_db import SessionLocal
-    from database.models import ContentSource, CarouselPlan, Carousel
-    from analyzer.analyzer import ContentAnalyzer
-    from renderer.carousel_generator import CarouselRenderer
-    import os
+    """Одобрить идею и запустить асинхронную генерацию карусели"""
+    from tasks.generation import generate_carousel_pipeline
+    from database.models import ContentSource
     
     db = SessionLocal()
     try:
-        # 1. Получить идею
         idea = db.query(ContentSource).filter_by(id=id).first()
         if not idea:
             return {"status": "error", "message": "Idea not found"}
             
         idea.status = "approved"
+        db.commit()
         
-        # 2. Сгенерировать план (если еще нет)
-        # В реальности лучше проверять, есть ли уже план
-        analyzer = ContentAnalyzer()
-        plan_data = analyzer.generate_carousel_plan(idea)
+        # Запуск асинхронного пайплайна
+        generate_carousel_pipeline.delay(idea.id)
         
-        if not plan_data:
-            return {"status": "error", "message": "Failed to generate plan"}
+        return {"status": "success", "message": "Generation started"}
+    finally:
+        db.close()
 
-        # Сохранить план в БД
-        plan = CarouselPlan(
-            source_id=idea.id,
-            title=plan_data.get("title", "Untitled"),
-            structure=plan_data,
-            status="ready"
+@app.post("/api/runs/start")
+async def start_run(run_data: RunCreate):
+    """Запустить новый пайплайн (создает запись и ставит задачу в Celery)"""
+    from tasks.discovery import discovery_accounts
+    from tasks.harvest import harvest_instagram_content
+    from tasks.scoring import score_pending
+    
+    db = SessionLocal()
+    try:
+        run = PipelineRun(
+            type=run_data.type,
+            status="pending",
+            config_snapshot=run_data.config or {}
         )
-        db.add(plan)
+        db.add(run)
         db.commit()
+        db.refresh(run)
         
-        # 3. Рендеринг
-        renderer = CarouselRenderer()
-        output_dir = os.getenv("OUTPUT_PATH", "./output")
-        zip_path = renderer.generate_carousel(plan_data, output_dir)
+        # Запуск задачи в Celery
+        if run_data.type == "discovery":
+            discovery_accounts.delay(run.id, run_data.config or {})
+        elif run_data.type == "harvest":
+            harvest_instagram_content.delay(run.id, run_data.config or {})
+        elif run_data.type == "scoring":
+            score_pending.delay(run.id)
+        else:
+            run.status = "failed"
+            run.error_log = f"Unknown run type: {run_data.type}"
+            db.commit()
+            raise HTTPException(status_code=400, detail="Invalid run type")
+            
+        return {"status": "success", "run_id": run.id}
+    finally:
+        db.close()
+
+@app.get("/api/runs/{run_id}")
+async def get_run_status(run_id: int):
+    """Получить статус выполнения пайплайна"""
+    db = SessionLocal()
+    try:
+        run = db.query(PipelineRun).filter(PipelineRun.id == run_id).first()
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return run
+    finally:
+        db.close()
+
+@app.get("/api/runs")
+async def list_runs(limit: int = 10):
+    """Получить список последних запусков"""
+    db = SessionLocal()
+    try:
+        runs = db.query(PipelineRun).order_by(PipelineRun.id.desc()).limit(limit).all()
+        return runs
+    finally:
+        db.close()
+
+@app.get("/api/content")
+async def list_content(status: Optional[str] = None, limit: int = 50):
+    """Получить список контента (идей)"""
+    from database.models import ContentSource
+    db = SessionLocal()
+    try:
+        query = db.query(ContentSource)
+        if status:
+            query = query.filter(ContentSource.status == status)
         
-        # Сохранить результат
-        carousel = Carousel(
-            plan_id=plan.id,
-            zip_path=zip_path,
-            status="ready"
-        )
-        db.add(carousel)
-        db.commit()
-        
-        return {"status": "success", "zip_path": zip_path}
-        
-    except Exception as e:
-        logger.error(f"Approval error: {e}")
-        return {"status": "error", "detail": str(e)}
+        items = query.order_by(ContentSource.score.desc().nulls_last()).limit(limit).all()
+        return items
+    finally:
+        db.close()
+
+@app.get("/api/carousels")
+async def list_carousels(limit: int = 10):
+    """Получить список готовых каруселей"""
+    from database.models import Carousel, CarouselPlan
+    db = SessionLocal()
+    try:
+        carousels = db.query(Carousel).join(CarouselPlan).order_by(Carousel.id.desc()).limit(limit).all()
+        return carousels
+    finally:
+        db.close()
+
+@app.get("/api/carousels/{id}/download")
+async def get_carousel_download_url(id: int):
+    """Получить ссылку для скачивания ZIP из S3"""
+    from database.models import Carousel
+    from storage.s3 import S3Storage
+    db = SessionLocal()
+    try:
+        carousel = db.query(Carousel).filter(Carousel.id == id).first()
+        if not carousel:
+            raise HTTPException(status_code=404, detail="Carousel not found")
+            
+        s3 = S3Storage()
+        url = s3.get_presigned_url(carousel.zip_object_key)
+        return {"download_url": url}
     finally:
         db.close()
 
